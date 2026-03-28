@@ -1,0 +1,12 @@
+{
+  "endpoint": "tcp://127.0.0.1:4002",
+  "topic": "",
+  "watch_var": "DJI",
+  "min_confidence": "0.7",
+  "min_rssi": "-80",
+  "omnisig_api": "tcp://127.0.0.1:4003",
+  "esp32_endpoint": "http://192.168.1.200",
+  "enable_led_trigger": true,
+  "case_sensitive": false,
+  "beep": true
+}

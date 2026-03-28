@@ -7,6 +7,64 @@ from tkinter import ttk, messagebox
 import requests
 
 import zmq
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+
+node_states = {
+    'NODE-01': 'IDLE',
+    'NODE-02': 'IDLE',
+    'NODE-03': 'IDLE',
+}
+
+kinetic_timers = {}  # node_id -> active threading.Timer
+
+flask_app = Flask(__name__)
+CORS(flask_app)
+
+
+@flask_app.route('/nodes', methods=['GET'])
+def get_nodes():
+    return jsonify(node_states)
+
+
+def _kinetic_expire(node_id):
+    node_states[node_id] = 'OFFLINE'
+    kinetic_timers.pop(node_id, None)
+
+
+@flask_app.route('/motion', methods=['POST'])
+def post_motion():
+    data = request.get_json(silent=True) or {}
+    node_id = data.get('node_id')
+    if node_id not in node_states:
+        return jsonify({'error': f'unknown node_id: {node_id}'}), 400
+
+    # Cancel any existing timer for this node before starting a fresh one
+    existing = kinetic_timers.pop(node_id, None)
+    if existing is not None:
+        existing.cancel()
+
+    node_states[node_id] = 'KINETIC'
+    timer = threading.Timer(30, _kinetic_expire, args=(node_id,))
+    timer.daemon = True
+    timer.start()
+    kinetic_timers[node_id] = timer
+
+    return jsonify({'node_id': node_id, 'state': 'KINETIC'})
+
+
+@flask_app.route('/motion/reset', methods=['GET'])
+def get_motion_reset():
+    for key in node_states:
+        node_states[key] = 'IDLE'
+    return jsonify(node_states)
+
+
+def start_flask():
+    flask_app.run(host='0.0.0.0', port=5000, use_reloader=False)
+
+
+CONFIG_FILE = "config.json"
 
 # Hacker/Matrix-inspired color palette - Black & Green
 COLORS = {
@@ -277,6 +335,7 @@ class App(ttk.Frame):
         self.trigger_cooldown = 10  # seconds
 
         self._build_ui()
+        self._load_config()
         self._poll_queue()
 
     def _apply_dark_theme(self):
@@ -458,8 +517,16 @@ class App(ttk.Frame):
         led_row1 = ttk.Frame(led_config)
         led_row1.pack(fill="x", padx=10, pady=(12, 6))
 
-        ttk.Checkbutton(led_row1, text="[ENABLE LED TRIGGER]",
-                       variable=self.enable_led_trigger).pack(side="left", padx=(0, 20))
+        self.led_toggle_btn = tk.Button(
+            led_row1, text="[ ] ENABLE LED TRIGGER",
+            command=self._toggle_led_trigger,
+            bg=COLORS['bg'], fg=COLORS['fg_secondary'],
+            font=('Courier New', 9, 'bold'), relief='flat',
+            borderwidth=0, padx=0, pady=0, cursor='hand2',
+            activebackground=COLORS['bg'], activeforeground=COLORS['accent'],
+            highlightthickness=0)
+        self.led_toggle_btn.pack(side="left", padx=(0, 20))
+        self.enable_led_trigger.trace_add('write', lambda *_: self._update_led_toggle_btn())
 
         ttk.Label(led_row1, text="MIN CONFIDENCE:",
                  font=('Courier New', 9, 'bold')).pack(side="left", padx=(0, 8))
@@ -505,42 +572,10 @@ class App(ttk.Frame):
                               highlightcolor=COLORS['glow'])
         esp32_entry.pack(side="left", padx=(0, 8))
 
-        # Log area - Terminal style
-        logf = ttk.LabelFrame(self, text=">>> SYSTEM LOG")
-        logf.pack(fill="both", expand=True, padx=15, pady=(0, 15))
-
-        # Text widget with terminal theme
-        log_frame = tk.Frame(logf, bg=COLORS['bg'])
-        log_frame.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # Scrollbar
-        scrollbar = tk.Scrollbar(log_frame, bg=COLORS['bg_secondary'],
-                                troughcolor=COLORS['bg'],
-                                activebackground=COLORS['accent'])
-        scrollbar.pack(side="right", fill="y")
-
-        self.log = tk.Text(log_frame, height=22, wrap="none",
-                          bg=COLORS['bg'], fg=COLORS['fg'],
-                          insertbackground=COLORS['accent'],
-                          selectbackground=COLORS['bg_accent'],
-                          selectforeground=COLORS['alert'],
-                          font=('Courier New', 10),
-                          relief='flat',
-                          yscrollcommand=scrollbar.set)
-        self.log.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=self.log.yview)
-
-        # Configure text tags for colored output - Matrix style
-        self.log.tag_configure('alert', foreground=COLORS['alert'], font=('Courier New', 10, 'bold'))
-        self.log.tag_configure('success', foreground=COLORS['success'], font=('Courier New', 10, 'bold'))
-        self.log.tag_configure('warning', foreground=COLORS['warning'])
-        self.log.tag_configure('info', foreground=COLORS['accent'])
-        self.log.tag_configure('error', foreground=COLORS['error'], font=('Courier New', 10, 'bold'))
-        self.log.tag_configure('timestamp', foreground=COLORS['fg_secondary'])
-
-        # Bottom controls
+        # Bottom controls — packed before the log so expand=True on the log
+        # doesn't steal the space needed by the button row.
         bottom = tk.Frame(self, bg=COLORS['bg'])
-        bottom.pack(fill="x", padx=15, pady=(0, 15))
+        bottom.pack(side="bottom", fill="x", padx=15, pady=(0, 15))
 
         # Control buttons - Terminal style
         btn_style = {'relief': 'solid', 'font': ('Courier New', 9), 'cursor': 'hand2',
@@ -564,7 +599,14 @@ class App(ttk.Frame):
                             bg=COLORS['bg'], fg=COLORS['alert'],
                             activebackground=COLORS['alert'], activeforeground=COLORS['bg'],
                             **btn_style)
-        test_btn.pack(side="left")
+        test_btn.pack(side="left", padx=(0, 8))
+
+        save_btn = tk.Button(bottom, text="[ SAVE CONFIG ]",
+                             command=self._save_config,
+                             bg=COLORS['bg'], fg=COLORS['fg_secondary'],
+                             activebackground=COLORS['fg_secondary'], activeforeground=COLORS['bg'],
+                             **btn_style)
+        save_btn.pack(side="left")
 
         # Status indicator - Terminal style
         status_frame = tk.Frame(bottom, bg=COLORS['bg'],
@@ -579,6 +621,85 @@ class App(ttk.Frame):
                                    font=('Courier New', 10, 'bold'),
                                    bg=COLORS['bg'], fg=COLORS['fg_secondary'])
         self.status_lbl.pack(side="left", padx=(0, 10), pady=6)
+
+        # Log area - Terminal style
+        logf = ttk.LabelFrame(self, text=">>> SYSTEM LOG")
+        logf.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+
+        # Text widget with terminal theme
+        log_frame = tk.Frame(logf, bg=COLORS['bg'])
+        log_frame.pack(fill="both", expand=True, padx=8, pady=8)
+
+        # Scrollbar
+        scrollbar = tk.Scrollbar(log_frame, bg=COLORS['bg_secondary'],
+                                troughcolor=COLORS['bg'],
+                                activebackground=COLORS['accent'])
+        scrollbar.pack(side="right", fill="y")
+
+        self.log = tk.Text(log_frame, height=8, wrap="none",
+                          bg=COLORS['bg'], fg=COLORS['fg'],
+                          insertbackground=COLORS['accent'],
+                          selectbackground=COLORS['bg_accent'],
+                          selectforeground=COLORS['alert'],
+                          font=('Courier New', 10),
+                          relief='flat',
+                          yscrollcommand=scrollbar.set)
+        self.log.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=self.log.yview)
+
+        # Configure text tags for colored output - Matrix style
+        self.log.tag_configure('alert', foreground=COLORS['alert'], font=('Courier New', 10, 'bold'))
+        self.log.tag_configure('success', foreground=COLORS['success'], font=('Courier New', 10, 'bold'))
+        self.log.tag_configure('warning', foreground=COLORS['warning'])
+        self.log.tag_configure('info', foreground=COLORS['accent'])
+        self.log.tag_configure('error', foreground=COLORS['error'], font=('Courier New', 10, 'bold'))
+        self.log.tag_configure('timestamp', foreground=COLORS['fg_secondary'])
+
+    def _toggle_led_trigger(self):
+        self.enable_led_trigger.set(not self.enable_led_trigger.get())
+
+    def _update_led_toggle_btn(self):
+        if self.enable_led_trigger.get():
+            self.led_toggle_btn.configure(text="[X] ENABLE LED TRIGGER", fg=COLORS['accent'])
+        else:
+            self.led_toggle_btn.configure(text="[ ] ENABLE LED TRIGGER", fg=COLORS['fg_secondary'])
+
+    def _load_config(self):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                cfg = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+        self.endpoint_var.set(cfg.get("endpoint", self.endpoint_var.get()))
+        self.topic_var.set(cfg.get("topic", self.topic_var.get()))
+        self.watch_var.set(cfg.get("watch_var", self.watch_var.get()))
+        self.min_confidence_var.set(cfg.get("min_confidence", self.min_confidence_var.get()))
+        self.min_rssi_var.set(cfg.get("min_rssi", self.min_rssi_var.get()))
+        self.omnisig_api_var.set(cfg.get("omnisig_api", self.omnisig_api_var.get()))
+        self.esp32_endpoint_var.set(cfg.get("esp32_endpoint", self.esp32_endpoint_var.get()))
+        self.enable_led_trigger.set(cfg.get("enable_led_trigger", self.enable_led_trigger.get()))
+        self.case_sensitive.set(cfg.get("case_sensitive", self.case_sensitive.get()))
+        self.beep.set(cfg.get("beep", self.beep.get()))
+
+    def _save_config(self):
+        cfg = {
+            "endpoint": self.endpoint_var.get(),
+            "topic": self.topic_var.get(),
+            "watch_var": self.watch_var.get(),
+            "min_confidence": self.min_confidence_var.get(),
+            "min_rssi": self.min_rssi_var.get(),
+            "omnisig_api": self.omnisig_api_var.get(),
+            "esp32_endpoint": self.esp32_endpoint_var.get(),
+            "enable_led_trigger": self.enable_led_trigger.get(),
+            "case_sensitive": self.case_sensitive.get(),
+            "beep": self.beep.get(),
+        }
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(cfg, f, indent=2)
+            self.log_line(">> Config saved to config.json", 'success')
+        except Exception as e:
+            self.log_line(f">> ERROR saving config: {e}", 'error')
 
     def log_line(self, s: str, tag=None):
         ts = time.strftime("%H:%M:%S")
@@ -765,33 +886,27 @@ class App(ttk.Frame):
             response = api_client.stop_inference()
             self.msg_q.put(("status", f"OmniSIG stopped: {response}"))
 
-            # Step 2: Turn on ESP32 LED
-            self.msg_q.put(("status", "Turning ON ESP32 LED..."))
+            # Step 2: Trigger JAM sequence on ESP32 (self-timed, 10 seconds)
+            node_states['NODE-01'] = 'JAMMING'
+            self.msg_q.put(("status", "Triggering JAM sequence on ESP32..."))
             try:
-                resp = requests.get(f"{esp32_endpoint}/led/on", timeout=3)
-                self.msg_q.put(("status", f"LED ON: {resp.status_code}"))
+                resp = requests.get(f"{esp32_endpoint}/jam", timeout=3)
+                self.msg_q.put(("status", f"JAM triggered: {resp.status_code}"))
             except Exception as e:
-                self.msg_q.put(("error", f"ESP32 LED ON failed: {e}"))
+                self.msg_q.put(("error", f"ESP32 JAM failed: {e}"))
 
             # Trigger alert visuals/sound
             self._trigger_alert(signal_type, msg=None)
 
-            # Step 3: Wait 5 seconds
-            time.sleep(5)
-
-            # Step 4: Turn off ESP32 LED
-            self.msg_q.put(("status", "Turning OFF ESP32 LED..."))
-            try:
-                resp = requests.get(f"{esp32_endpoint}/led/off", timeout=3)
-                self.msg_q.put(("status", f"LED OFF: {resp.status_code}"))
-            except Exception as e:
-                self.msg_q.put(("error", f"ESP32 LED OFF failed: {e}"))
+            # Step 3: Wait for jam duration to complete
+            time.sleep(10)
 
             # Step 5: Restart OmniSIG inference
             self.msg_q.put(("status", "Restarting OmniSIG inference..."))
             response = api_client.start_inference()
             self.msg_q.put(("status", f"OmniSIG restarted: {response}"))
             api_client.close()
+            node_states['NODE-01'] = 'IDLE'
 
             # Step 6: Set cooldown timer
             self.last_trigger_time = time.time()
@@ -804,6 +919,9 @@ class App(ttk.Frame):
 
 
 def main():
+    flask_thread = threading.Thread(target=start_flask, daemon=True)
+    flask_thread.start()
+
     root = tk.Tk()
 
     # Set window icon behavior (optional, helps with taskbar)

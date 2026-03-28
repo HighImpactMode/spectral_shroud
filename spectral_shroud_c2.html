@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SPECTRAL SHROUD // C2 DISPLAY</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #000;
+      color: #00ff41;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+    }
+
+    #cesiumContainer {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Shared panel style */
+    .hud-panel {
+      background: rgba(0, 0, 0, 0.78);
+      border: 1px solid #1a3a1a;
+      box-shadow: 0 0 12px rgba(0,255,65,0.15), inset 0 0 20px rgba(0,0,0,0.5);
+      padding: 12px 16px;
+      border-radius: 2px;
+    }
+
+    /* HUD overlay */
+    #hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 12px 16px;
+      pointer-events: none;
+      z-index: 100;
+    }
+
+    #title-block {
+      pointer-events: none;
+    }
+
+    #title-block h1 {
+      font-size: 20px;
+      font-weight: bold;
+      color: #00ff41;
+      text-shadow: 0 0 12px #00ff41;
+      letter-spacing: 4px;
+    }
+
+    #title-block .subtitle {
+      font-size: 11px;
+      color: #00b830;
+      letter-spacing: 2px;
+      margin-top: 3px;
+    }
+
+    #clock {
+      font-size: 13px;
+      color: #00ff41;
+      text-align: center;
+      text-shadow: 0 0 8px #00ff41;
+    }
+
+    #clock .zulu {
+      font-size: 24px;
+      font-weight: bold;
+      letter-spacing: 3px;
+    }
+
+    /* Node status panel */
+    #node-panel {
+      position: fixed;
+      bottom: 16px;
+      left: 16px;
+      z-index: 100;
+      pointer-events: none;
+      min-width: 320px;
+    }
+
+    #node-panel .panel-title {
+      font-size: 10px;
+      color: #00ff41;
+      letter-spacing: 3px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid #1a4a1a;
+      padding-bottom: 6px;
+    }
+
+    .node-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .node-dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+
+    .node-label { color: #00ff41; min-width: 85px; font-weight: bold; }
+    .node-state { min-width: 95px; font-weight: bold; }
+    .node-coord { color: #007a2a; font-size: 10px; }
+
+    /* Alert banner */
+    #alert-banner {
+      position: fixed;
+      top: 90px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      background: rgba(0,0,0,0.92);
+      border: 2px solid #39ff14;
+      box-shadow: 0 0 20px rgba(57,255,20,0.5);
+      padding: 12px 40px;
+      font-size: 15px;
+      font-weight: bold;
+      color: #39ff14;
+      letter-spacing: 4px;
+      text-shadow: 0 0 10px #39ff14;
+      display: none;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    /* Legend */
+    #legend {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      z-index: 100;
+      pointer-events: none;
+      font-size: 12px;
+      min-width: 190px;
+    }
+
+    #legend .legend-title {
+      color: #00ff41;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      font-size: 10px;
+      border-bottom: 1px solid #1a4a1a;
+      padding-bottom: 6px;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 7px;
+      color: #00b830;
+    }
+
+    .legend-dot {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+
+    /* Connection status */
+    #conn-status {
+      position: fixed;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      letter-spacing: 2px;
+      z-index: 100;
+      pointer-events: none;
+      background: rgba(0,0,0,0.7);
+      padding: 4px 12px;
+      border: 1px solid #1a3a1a;
+    }
+  </style>
+</head>
+<body>
+
+<div id="cesiumContainer"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="title-block" class="hud-panel">
+    <h1>▓▒░ SPECTRAL SHROUD ░▒▓</h1>
+    <div class="subtitle">[ DISTRIBUTED RF MITIGATION // C2 DISPLAY ]</div>
+    <div class="subtitle" style="margin-top:4px;">AO: BAKHMUT, DONETSK OBLAST, UKRAINE</div>
+  </div>
+
+  <div id="clock" class="hud-panel">
+    <div style="font-size:10px;letter-spacing:2px;color:#00b830;">ZULU TIME</div>
+    <div class="zulu" id="zulu-time">--:--:--</div>
+    <div style="font-size:10px;color:#007a2a;" id="zulu-date">----/--/--</div>
+  </div>
+</div>
+
+<div id="conn-status">
+  <span id="conn-text" style="color:#007a2a;">[ CONNECTING TO SHROUD... ]</span>
+</div>
+
+<!-- Alert banner -->
+<div id="alert-banner">
+  ⚠ TARGET DETECTED — JAM SEQUENCE ACTIVE ⚠
+</div>
+
+<!-- Node status panel -->
+<div id="node-panel" class="hud-panel">
+  <div class="panel-title">&gt;&gt;&gt; SENSOR NODE STATUS</div>
+  <div id="node-rows"></div>
+</div>
+
+<!-- Legend -->
+<div id="legend" class="hud-panel">
+  <div class="legend-title">&gt;&gt;&gt; NODE STATE</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#00ff41;box-shadow:0 0 6px #00ff41;"></div> IDLE / HEARTBEAT</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#ffff00;box-shadow:0 0 6px #ffff00;"></div> JAMMING ACTIVE</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#ff0000;box-shadow:0 0 6px #ff0000;"></div> KINETIC TRIGGERED</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#444;"></div> NODE OFFLINE</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#00aaff;box-shadow:0 0 6px #00aaff;"></div> C2 / HQ</div>
+</div>
+
+<script>
+  // ─── CONFIGURATION ────────────────────────────────────────────────────────
+  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJhOGUxNGU5Yi05OTZiLTQwODItYTJjMC01NmJhNDg5OWY3YTgiLCJpZCI6NDEwNTM2LCJpYXQiOjE3NzQ3MjY4NDh9.CZdTk7zH16LOewCS7c2hxnv6wROm-PcrSM1AjoBK7J8';
+
+  // Shroud status endpoint — add a small Flask server to Shroud to serve this
+  const SHROUD_STATUS_URL = 'http://127.0.0.1:5000/nodes';
+
+  // ─── NODE DEFINITIONS ─────────────────────────────────────────────────────
+  // Bakhmut area coordinates — ~1km sq sensor ring + C2 position
+  // Adjust these to taste for the demo
+  const NODES = [
+    {
+      id: 'C2-HQ',
+      label: 'C2 / HQ',
+      lat: 48.5950,
+      lon: 37.9850,
+      type: 'c2',
+      ip: null,
+    },
+    {
+      id: 'NODE-01',
+      label: 'NODE-01',
+      lat: 48.6010,
+      lon: 37.9780,
+      type: 'sensor',
+      ip: '192.168.1.200',
+    },
+    {
+      id: 'NODE-02',
+      label: 'NODE-02',
+      lat: 48.6025,
+      lon: 37.9920,
+      type: 'sensor',
+      ip: '192.168.1.201',
+    },
+    {
+      id: 'NODE-03',
+      label: 'NODE-03',
+      lat: 48.5990,
+      lon: 37.9960,
+      type: 'sensor',
+      ip: '192.168.1.202',
+    },
+  ];
+
+  // ─── STATE ────────────────────────────────────────────────────────────────
+  const nodeStates = {};
+  NODES.forEach(n => nodeStates[n.id] = 'IDLE');
+
+  // ─── COLOR MAP ────────────────────────────────────────────────────────────
+  function stateColor(state, type) {
+    if (type === 'c2') return Cesium.Color.DODGERBLUE;
+    switch (state) {
+      case 'JAMMING':  return Cesium.Color.YELLOW;
+      case 'KINETIC':  return Cesium.Color.RED;
+      case 'OFFLINE':  return Cesium.Color.fromCssColorString('#333333');
+      default:         return Cesium.Color.LIME;
+    }
+  }
+
+  function stateCssColor(state, type) {
+    if (type === 'c2') return '#00aaff';
+    switch (state) {
+      case 'JAMMING':  return '#ffff00';
+      case 'KINETIC':  return '#ff0000';
+      case 'OFFLINE':  return '#333333';
+      default:         return '#00ff41';
+    }
+  }
+
+  function stateLabel(state, type) {
+    if (type === 'c2') return 'ACTIVE';
+    return state;
+  }
+
+  // ─── CESIUM INIT ──────────────────────────────────────────────────────────
+  const viewer = new Cesium.Viewer('cesiumContainer', {
+    terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+    baseLayerPicker: false,
+    navigationHelpButton: false,
+    sceneModePicker: false,
+    geocoder: false,
+    homeButton: false,
+    fullscreenButton: false,
+    animation: false,
+    timeline: false,
+    infoBox: false,
+    selectionIndicator: false,
+  });
+
+  // Hide Cesium logo
+  viewer.cesiumWidget.creditContainer.style.display = 'none';
+
+  // Fly to Bakhmut
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(37.9900, 48.5980, 3500),
+    orientation: {
+      heading: Cesium.Math.toRadians(0),
+      pitch: Cesium.Math.toRadians(-55),
+      roll: 0,
+    },
+    duration: 3,
+  });
+
+  // ─── BUILD ENTITIES ───────────────────────────────────────────────────────
+  const entityMap = {};
+
+  NODES.forEach(node => {
+    const isC2 = node.type === 'c2';
+    const color = stateColor('IDLE', node.type);
+
+    const entity = viewer.entities.add({
+      id: node.id,
+      position: Cesium.Cartesian3.fromDegrees(node.lon, node.lat),
+      point: {
+        pixelSize: isC2 ? 24 : 20,
+        color: color,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: node.label,
+        font: 'bold 14px Courier New',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 6,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -26),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+
+    entityMap[node.id] = entity;
+  });
+
+  // Draw sensor ring
+  viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray([
+        NODES[1].lon, NODES[1].lat,
+        NODES[2].lon, NODES[2].lat,
+        NODES[3].lon, NODES[3].lat,
+        NODES[1].lon, NODES[1].lat,
+      ]),
+      width: 2,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString('#1a5a1a'),
+        dashLength: 12,
+      }),
+      clampToGround: true,
+    }
+  });
+
+  // ─── NODE STATUS PANEL ────────────────────────────────────────────────────
+  function buildNodePanel() {
+    const container = document.getElementById('node-rows');
+    container.innerHTML = '';
+    NODES.forEach(node => {
+      const state = nodeStates[node.id];
+      const cssColor = stateCssColor(state, node.type);
+      const row = document.createElement('div');
+      row.className = 'node-row';
+      row.id = `row-${node.id}`;
+      row.innerHTML = `
+        <div class="node-dot" id="dot-${node.id}" style="background:${cssColor};box-shadow:0 0 6px ${cssColor};"></div>
+        <div class="node-label">${node.label}</div>
+        <div class="node-state" id="state-${node.id}" style="color:${cssColor};">${stateLabel(state, node.type)}</div>
+        <div class="node-coord">${node.lat.toFixed(4)}°N ${node.lon.toFixed(4)}°E</div>
+      `;
+      container.appendChild(row);
+    });
+  }
+
+  buildNodePanel();
+
+  // ─── UPDATE ENTITY STATE ──────────────────────────────────────────────────
+  function updateNode(nodeId, state) {
+    const node = NODES.find(n => n.id === nodeId);
+    if (!node) return;
+    const entity = entityMap[nodeId];
+    if (!entity) return;
+
+    nodeStates[nodeId] = state;
+    const color = stateColor(state, node.type);
+    const cssColor = stateCssColor(state, node.type);
+
+    entity.point.color = color;
+    entity.label.fillColor = color;
+
+    // Update panel
+    const dot = document.getElementById(`dot-${nodeId}`);
+    const stateEl = document.getElementById(`state-${nodeId}`);
+    if (dot) { dot.style.background = cssColor; dot.style.boxShadow = `0 0 6px ${cssColor}`; }
+    if (stateEl) { stateEl.style.color = cssColor; stateEl.textContent = stateLabel(state, node.type); }
+
+    // Alert banner
+    const anyJamming = Object.values(nodeStates).some(s => s === 'JAMMING');
+    const banner = document.getElementById('alert-banner');
+    banner.style.display = anyJamming ? 'block' : 'none';
+  }
+
+  // ─── POLL SHROUD ──────────────────────────────────────────────────────────
+  // This polls the Flask /nodes endpoint on Spectral Shroud.
+  // Format expected: { "NODE-01": "IDLE", "NODE-02": "JAMMING", ... }
+  async function pollShroud() {
+    try {
+      const resp = await fetch(SHROUD_STATUS_URL, { signal: AbortSignal.timeout(1500) });
+      const data = await resp.json();
+
+      document.getElementById('conn-text').textContent = '[ SHROUD LINK: ACTIVE ]';
+      document.getElementById('conn-text').style.color = '#00ff41';
+
+      Object.entries(data).forEach(([id, state]) => updateNode(id, state));
+    } catch (e) {
+      document.getElementById('conn-text').textContent = '[ SHROUD LINK: NO SIGNAL ]';
+      document.getElementById('conn-text').style.color = '#ff0000';
+    }
+  }
+
+  setInterval(pollShroud, 1000);
+  pollShroud();
+
+  // ─── ZULU CLOCK ───────────────────────────────────────────────────────────
+  function updateClock() {
+    const now = new Date();
+    const hh = String(now.getUTCHours()).padStart(2, '0');
+    const mm = String(now.getUTCMinutes()).padStart(2, '0');
+    const ss = String(now.getUTCSeconds()).padStart(2, '0');
+    const yyyy = now.getUTCFullYear();
+    const mo = String(now.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(now.getUTCDate()).padStart(2, '0');
+    document.getElementById('zulu-time').textContent = `${hh}:${mm}:${ss}Z`;
+    document.getElementById('zulu-date').textContent = `${yyyy}/${mo}/${dd}`;
+  }
+
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ─── HEARTBEAT PULSE ──────────────────────────────────────────────────────
+  // Gently pulses idle node sizes to simulate a heartbeat
+  let pulseUp = true;
+  setInterval(() => {
+    NODES.forEach(node => {
+      const entity = entityMap[node.id];
+      if (!entity) return;
+      const state = nodeStates[node.id];
+      if (state !== 'IDLE') return;
+      const base = node.type === 'c2' ? 24 : 20;
+      const target = pulseUp ? base + 3 : base;
+      entity.point.pixelSize = target;
+    });
+    pulseUp = !pulseUp;
+  }, 800);
+
+</script>
+</body>
+</html>
