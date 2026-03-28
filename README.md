@@ -227,9 +227,109 @@ spectral_shroud/
 
 ---
 
+## How to Run It (Step by Step)
+
+This is the exact sequence to go from a cold start to a live demo.
+
+**Prerequisites:** ESP32 flashed, on the same WiFi network as your laptop, OmniSIG Engine installed or a ZMQ test script ready.
+
+**Step 1 — Start the Flask + Shroud backend**
+```bash
+cd ~/spectral_shroud
+python3 spectral_shroud.py
+```
+The Spectral Shroud UI will open. The Flask `/nodes` API starts automatically in the background on port 5000.
+
+**Step 2 — Serve the Cesium C2 display**
+Open a second terminal:
+```bash
+cd ~/spectral_shroud
+python3 -m http.server 8080
+```
+Then open your browser to `http://localhost:8080/spectral_shroud_c2.html`. You should see the Bakhmut satellite map load with your nodes plotted and `SHROUD LINK: ACTIVE` in the top center.
+
+**Step 3 — Configure Spectral Shroud**
+In the Shroud UI set:
+- **ENDPOINT:** `tcp://127.0.0.1:4002`
+- **WATCH:** `DJI` (or whatever label your OmniSIG model outputs)
+- **ESP32 ENDPOINT:** `http://192.168.1.200` (your node's IP)
+- **Enable LED Trigger:** checked
+- Hit **[ CONNECT ]**
+
+Hit **[ SAVE CONFIG ]** so these settings persist on next launch.
+
+**Step 4 — Trigger a detection**
+
+*With OmniSIG Engine:* Load a DJI IQ capture file and start inference. When the engine classifies a DJI signal above your confidence threshold, the sequence fires automatically.
+
+*Without OmniSIG (test mode):* Run this in a third terminal:
+```bash
+python3 -c "
+import zmq, json, time
+ctx = zmq.Context()
+sock = ctx.socket(zmq.PUB)
+sock.bind('tcp://127.0.0.1:4002')
+time.sleep(2)
+msg = {'annotations': [{'core:label': 'DJI', 'confidence': 0.95, 'rssi': -60}]}
+for i in range(5):
+    sock.send_json(msg)
+    time.sleep(1)
+"
+```
+
+**Step 5 — Watch the kill chain fire**
+- Shroud detects the DJI label → stops OmniSIG inference
+- HTTP command sent to ESP32 → onboard LED lights up
+- NODE-01 flips yellow on the Cesium map → alert banner fires
+- After 10 seconds → LED off, OmniSIG restarts, node returns green
+
+**Step 6 — Trigger kinetic (tamper simulation)**
+Press the **BOOT button** on the ESP32. NODE-01 flips red on the map. After 30 seconds it goes dark (OFFLINE).
+
+**Step 7 — Reset**
+```bash
+curl http://127.0.0.1:5000/motion/reset
+```
+All nodes return to IDLE green.
+
+---
+
+## POC Substitutions — What Stands In For What
+
+This is a proof of concept. Real battlefield hardware is represented by simple analogues to validate the software logic and communication architecture.
+
+| Real Capability | POC Substitute | Notes |
+|---|---|---|
+| RF Jammer | 🟡 Yellow LED on ESP32 | Indicates jamming would be active. In a real system this triggers an SDR transmitting suppression waveforms on the detected frequency |
+| Kinetic self-destruct | 🔴 Red LED on ESP32 | Indicates kinetic effect triggered. In a real system this could be a thermite charge, shaped charge, or data wipe |
+| Motion/tamper sensor | BOOT button (GPIO0) | Manually pressed to simulate node being picked up or disturbed. Real system uses MPU-6050 accelerometer or PIR sensor |
+| Encrypted mesh radio | WiFi (802.11) | Works on a local network. Real system uses LoRa, private 5G, or Starlink for long-range encrypted comms |
+| GPS module | Hardcoded coordinates | Node positions are fixed in firmware. Real system uses a u-blox or similar GPS module reporting live position |
+| Solar + battery | USB power | Nodes are powered by laptop USB or power bank. Real system uses LiPo + solar panel with charge controller |
+| Ruggedized enclosure | Bare PCB | Real nodes would be potted in epoxy or housed in mil-spec enclosures rated for weather, dust, vibration |
+| Multiple nodes | Single ESP32 | Architecture supports N nodes — each needs a unique static IP and node ID in the firmware |
+
+---
+
+## How It Would Work in the Real World
+
+In a real deployment the architecture stays identical — only the hardware at the edge changes.
+
+**Deployment:** Nodes are emplaced manually or air-dropped across a defined area — a perimeter, a chokepoint, a forward operating base. Each node is self-contained: SDR receiver, encrypted radio, GPS, compute, power, and effector (jammer or kinetic charge) in a ruggedized weatherproof housing costing ideally under $5,000 per unit.
+
+**Operation:** The C2 laptop (or a hardened tablet) runs Spectral Shroud and the Cesium display from any location with network access to the mesh. Nodes operate autonomously — if the C2 link goes down, nodes continue executing their last programmed behavior. When a node detects a target signal above threshold, it fires its local effector immediately without waiting for C2 confirmation. The C2 display reflects what happened after the fact.
+
+**Direction Finding:** With enough nodes distributed across an area, the detection pattern itself becomes a DF approximation. If NODE-03 and NODE-07 detect a signal but NODE-01 does not, the signal source is likely in the sector between 03 and 07. No AoA hardware required — the mesh geometry does the work.
+
+**Survivability:** Nodes that go offline (destroyed, captured, battery dead) are simply removed from the display. The remaining nodes continue operating. There is no single point of failure. This is the core architectural advantage over a single high-value jammer or radar system.
+
+**Escalation:** The kinetic anti-tamper function means a captured node destroys itself before it can be exploited for intelligence. The 30-second timer before going OFFLINE gives the C2 operator a window to confirm the event before the node self-destructs.
+
+---
+
 ## Background
 
-This project was built as a personal Dev Days project at [DeepSig](https://deepsig.com), exploring the intersection of AI-native RF sensing (OmniSIG Engine) and autonomous distributed systems concepts drawn from SIGINT and electronic warfare experience.
+This project was built as a Dev Days project at [DeepSig](https://deepsig.com), exploring the intersection of AI-native RF sensing (OmniSIG Engine) and autonomous distributed systems concepts drawn from SIGINT and electronic warfare experience.
 
 The convergent evolution happening in defense tech — Anduril, Shield AI, and others — is moving toward exactly this architecture at scale. Spectral Shroud is a one-person proof that the core loop (sense → decide → effect → report) is achievable with commercial hardware and a weekend of engineering.
 
@@ -240,7 +340,5 @@ The convergent evolution happening in defense tech — Anduril, Shield AI, and o
 This project is a proof of concept for educational and research purposes. RF jamming is regulated and illegal without proper authorization in most jurisdictions. The "jamming" and "kinetic" effects demonstrated here are represented by LEDs only. Always comply with applicable laws and regulations.
 
 ---
-
-*Built by Morgan — USAF SIGINT veteran, RF engineer, DeepSig Field Support Representative*
 
 *"Hundreds of low-cost nodes. Mesh architecture. Loss of nodes does not collapse the system."*
