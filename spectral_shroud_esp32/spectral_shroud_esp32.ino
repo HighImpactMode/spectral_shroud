@@ -3,8 +3,8 @@
 #include <HTTPClient.h>
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const char* SSID     = "YOUR_WIFI_SSID";
-const char* PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* SSID     = "moreflops-5G";
+const char* PASSWORD = "d33pW1PHY##!!25";
 
 // Optional: set a static IP so Spectral Shroud always knows where to find this node.
 // If you prefer DHCP, comment out the three lines below and the WiFi.config() call.

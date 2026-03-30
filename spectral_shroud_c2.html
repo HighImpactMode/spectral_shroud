@@ -223,7 +223,8 @@
 <div id="legend" class="hud-panel">
   <div class="legend-title">&gt;&gt;&gt; NODE STATE</div>
   <div class="legend-row"><div class="legend-dot" style="background:#00ff41;box-shadow:0 0 6px #00ff41;"></div> IDLE / HEARTBEAT</div>
-  <div class="legend-row"><div class="legend-dot" style="background:#ffff00;box-shadow:0 0 6px #ffff00;"></div> JAMMING ACTIVE</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#ffff00;box-shadow:0 0 6px #ffff00;"></div> SIGNAL DETECTED</div>
+  <div class="legend-row"><div class="legend-dot" style="background:#ff8c00;box-shadow:0 0 6px #ff8c00;"></div> JAMMING ACTIVE</div>
   <div class="legend-row"><div class="legend-dot" style="background:#ff0000;box-shadow:0 0 6px #ff0000;"></div> KINETIC TRIGGERED</div>
   <div class="legend-row"><div class="legend-dot" style="background:#444;"></div> NODE OFFLINE</div>
   <div class="legend-row"><div class="legend-dot" style="background:#00aaff;box-shadow:0 0 6px #00aaff;"></div> C2 / HQ</div>
@@ -282,7 +283,8 @@
   function stateColor(state, type) {
     if (type === 'c2') return Cesium.Color.DODGERBLUE;
     switch (state) {
-      case 'JAMMING':  return Cesium.Color.YELLOW;
+      case 'DETECTED': return Cesium.Color.YELLOW;
+      case 'JAMMING':  return Cesium.Color.fromCssColorString('#ff8c00');
       case 'KINETIC':  return Cesium.Color.RED;
       case 'OFFLINE':  return Cesium.Color.fromCssColorString('#333333');
       default:         return Cesium.Color.LIME;
@@ -292,7 +294,8 @@
   function stateCssColor(state, type) {
     if (type === 'c2') return '#00aaff';
     switch (state) {
-      case 'JAMMING':  return '#ffff00';
+      case 'DETECTED': return '#ffff00';
+      case 'JAMMING':  return '#ff8c00';
       case 'KINETIC':  return '#ff0000';
       case 'OFFLINE':  return '#333333';
       default:         return '#00ff41';
@@ -335,6 +338,7 @@
 
   // ─── BUILD ENTITIES ───────────────────────────────────────────────────────
   const entityMap = {};
+  const jammingRingMap = {};
 
   NODES.forEach(node => {
     const isC2 = node.type === 'c2';
@@ -386,6 +390,33 @@
     }
   });
 
+  // ─── JAMMING PULSE RINGS ──────────────────────────────────────────────────
+  // Companion ellipse per sensor node — only visible when node is JAMMING.
+  // A CallbackProperty drives radius and alpha each frame via performance.now().
+  NODES.filter(n => n.type === 'sensor').forEach(node => {
+    const PERIOD = 1400; // ms per full expansion cycle
+    const MIN_R  = 20;   // metres — starts tight around the dot
+    const MAX_R  = 260;  // metres — expands ~3× the dot visual footprint
+
+    // t: 0→1 linear ramp within each period
+    const t = () => (performance.now() % PERIOD) / PERIOD;
+
+    const ringEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(node.lon, node.lat),
+      show: false,
+      ellipse: {
+        semiMajorAxis: new Cesium.CallbackProperty(() => MIN_R + t() * (MAX_R - MIN_R), false),
+        semiMinorAxis: new Cesium.CallbackProperty(() => MIN_R + t() * (MAX_R - MIN_R), false),
+        material: new Cesium.ColorMaterialProperty(
+          new Cesium.CallbackProperty(() => Cesium.Color.fromCssColorString('#ff8c00').withAlpha(0.80 * (1.0 - t())), false)
+        ),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+
+    jammingRingMap[node.id] = ringEntity;
+  });
+
   // ─── NODE STATUS PANEL ────────────────────────────────────────────────────
   function buildNodePanel() {
     const container = document.getElementById('node-rows');
@@ -429,9 +460,22 @@
     if (stateEl) { stateEl.style.color = cssColor; stateEl.textContent = stateLabel(state, node.type); }
 
     // Alert banner
-    const anyJamming = Object.values(nodeStates).some(s => s === 'JAMMING');
+    const anyJamming  = Object.values(nodeStates).some(s => s === 'JAMMING');
+    const anyDetected = Object.values(nodeStates).some(s => s === 'DETECTED');
     const banner = document.getElementById('alert-banner');
-    banner.style.display = anyJamming ? 'block' : 'none';
+    if (anyJamming) {
+      banner.textContent = '⚠ JAM SEQUENCE ACTIVE ⚠';
+      banner.style.display = 'block';
+    } else if (anyDetected) {
+      banner.textContent = '⚠ SIGNAL DETECTED — MONITORING ⚠';
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+    }
+
+    // Jamming pulse ring — show/hide immediately on state change
+    const ring = jammingRingMap[nodeId];
+    if (ring) ring.show = (state === 'JAMMING');
   }
 
   // ─── POLL SHROUD ──────────────────────────────────────────────────────────

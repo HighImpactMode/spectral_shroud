@@ -10,6 +10,7 @@ import zmq
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
+# Valid state values: 'IDLE', 'DETECTED', 'JAMMING', 'KINETIC', 'OFFLINE'
 node_states = {
     'NODE-01': 'IDLE',
     'NODE-02': 'IDLE',
@@ -61,6 +62,8 @@ def get_motion_reset():
 
 
 def start_flask():
+    import logging
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
     flask_app.run(host='0.0.0.0', port=5000, use_reloader=False)
 
 
@@ -429,6 +432,8 @@ class App(ttk.Frame):
         self.omnisig_api_var = tk.StringVar(value="tcp://127.0.0.1:4003")
         self.esp32_endpoint_var = tk.StringVar(value="http://192.168.1.100")
         self.enable_led_trigger = tk.BooleanVar(value=False)
+        self.auto_jam_var = tk.BooleanVar(value=False)
+        self.broadcast_jam_var = tk.BooleanVar(value=False)
 
         # Connection row
         conn_row = ttk.Frame(conn)
@@ -525,8 +530,30 @@ class App(ttk.Frame):
             borderwidth=0, padx=0, pady=0, cursor='hand2',
             activebackground=COLORS['bg'], activeforeground=COLORS['accent'],
             highlightthickness=0)
-        self.led_toggle_btn.pack(side="left", padx=(0, 20))
+        self.led_toggle_btn.pack(side="left", padx=(0, 12))
         self.enable_led_trigger.trace_add('write', lambda *_: self._update_led_toggle_btn())
+
+        self.auto_jam_btn = tk.Button(
+            led_row1, text="[ ] AUTO JAM",
+            command=self._toggle_auto_jam,
+            bg=COLORS['bg'], fg=COLORS['fg_secondary'],
+            font=('Courier New', 9, 'bold'), relief='flat',
+            borderwidth=0, padx=0, pady=0, cursor='hand2',
+            activebackground=COLORS['bg'], activeforeground=COLORS['accent'],
+            highlightthickness=0)
+        self.auto_jam_btn.pack(side="left", padx=(0, 12))
+        self.auto_jam_var.trace_add('write', lambda *_: self._update_auto_jam_btn())
+
+        self.broadcast_jam_btn = tk.Button(
+            led_row1, text="[ ] BROADCAST JAM",
+            command=self._toggle_broadcast_jam,
+            bg=COLORS['bg'], fg=COLORS['fg_secondary'],
+            font=('Courier New', 9, 'bold'), relief='flat',
+            borderwidth=0, padx=0, pady=0, cursor='hand2',
+            activebackground=COLORS['bg'], activeforeground=COLORS['accent'],
+            highlightthickness=0)
+        self.broadcast_jam_btn.pack(side="left", padx=(0, 20))
+        self.broadcast_jam_var.trace_add('write', lambda *_: self._update_broadcast_jam_btn())
 
         ttk.Label(led_row1, text="MIN CONFIDENCE:",
                  font=('Courier New', 9, 'bold')).pack(side="left", padx=(0, 8))
@@ -595,7 +622,7 @@ class App(ttk.Frame):
         reset_btn.pack(side="left", padx=(0, 8))
 
         test_btn = tk.Button(bottom, text="[ TEST ALERT ]",
-                            command=lambda: self._trigger_alert("TEST"),
+                            command=self._fire_test_detection,
                             bg=COLORS['bg'], fg=COLORS['alert'],
                             activebackground=COLORS['alert'], activeforeground=COLORS['bg'],
                             **btn_style)
@@ -664,6 +691,24 @@ class App(ttk.Frame):
         else:
             self.led_toggle_btn.configure(text="[ ] ENABLE LED TRIGGER", fg=COLORS['fg_secondary'])
 
+    def _toggle_auto_jam(self):
+        self.auto_jam_var.set(not self.auto_jam_var.get())
+
+    def _update_auto_jam_btn(self):
+        if self.auto_jam_var.get():
+            self.auto_jam_btn.configure(text="[X] AUTO JAM", fg=COLORS['alert'])
+        else:
+            self.auto_jam_btn.configure(text="[ ] AUTO JAM", fg=COLORS['fg_secondary'])
+
+    def _toggle_broadcast_jam(self):
+        self.broadcast_jam_var.set(not self.broadcast_jam_var.get())
+
+    def _update_broadcast_jam_btn(self):
+        if self.broadcast_jam_var.get():
+            self.broadcast_jam_btn.configure(text="[X] BROADCAST JAM", fg=COLORS['alert'])
+        else:
+            self.broadcast_jam_btn.configure(text="[ ] BROADCAST JAM", fg=COLORS['fg_secondary'])
+
     def _load_config(self):
         try:
             with open(CONFIG_FILE, "r") as f:
@@ -678,6 +723,8 @@ class App(ttk.Frame):
         self.omnisig_api_var.set(cfg.get("omnisig_api", self.omnisig_api_var.get()))
         self.esp32_endpoint_var.set(cfg.get("esp32_endpoint", self.esp32_endpoint_var.get()))
         self.enable_led_trigger.set(cfg.get("enable_led_trigger", self.enable_led_trigger.get()))
+        self.auto_jam_var.set(cfg.get("auto_jam", self.auto_jam_var.get()))
+        self.broadcast_jam_var.set(cfg.get("broadcast_jam", self.broadcast_jam_var.get()))
         self.case_sensitive.set(cfg.get("case_sensitive", self.case_sensitive.get()))
         self.beep.set(cfg.get("beep", self.beep.get()))
 
@@ -691,6 +738,8 @@ class App(ttk.Frame):
             "omnisig_api": self.omnisig_api_var.get(),
             "esp32_endpoint": self.esp32_endpoint_var.get(),
             "enable_led_trigger": self.enable_led_trigger.get(),
+            "auto_jam": self.auto_jam_var.get(),
+            "broadcast_jam": self.broadcast_jam_var.get(),
             "case_sensitive": self.case_sensitive.get(),
             "beep": self.beep.get(),
         }
@@ -762,6 +811,20 @@ class App(ttk.Frame):
             pass
         self.after(75, self._poll_queue)
 
+    def _fire_test_detection(self):
+        """Simulate a real detection by feeding a synthetic SigMF message into _handle_json()."""
+        raw_items = [x.strip() for x in self.watch_var.get().split(",") if x.strip()]
+        if not raw_items:
+            self._trigger_alert("TEST")
+            return
+        label = raw_items[0]
+        synthetic = {
+            "signal_type": label,
+            "confidence": 0.95,
+            "rssi": -60,
+        }
+        self._handle_json(synthetic)
+
     def _watchlist(self):
         raw = self.watch_var.get()
         items = [x.strip() for x in raw.split(",") if x.strip()]
@@ -806,8 +869,16 @@ class App(ttk.Frame):
                     meets_rssi = rssi is None or rssi >= min_rssi
 
                     if meets_confidence and meets_rssi:
-                        self.log_line(f">> LED TRIGGER: {', '.join(matched)} (conf={confidence}, rssi={rssi})", 'success')
-                        self._trigger_led_sequence(", ".join(matched), confidence, rssi)
+                        if self.auto_jam_var.get():
+                            self.log_line(f">> LED TRIGGER: {', '.join(matched)} (conf={confidence}, rssi={rssi})", 'success')
+                            self._trigger_led_sequence(", ".join(matched), confidence, rssi)
+                        else:
+                            self.log_line(f">> DETECTED (manual mode): {', '.join(matched)} (conf={confidence}, rssi={rssi})", 'warning')
+                            node_states['NODE-01'] = 'DETECTED'
+                            self.last_trigger_time = time.time()
+                            self._trigger_alert(", ".join(matched), msg=None)
+                            t = threading.Thread(target=self._detected_reset_worker, daemon=True)
+                            t.start()
                     else:
                         self.log_line(f">> DETECTED: {', '.join(matched)} (conf={confidence}, rssi={rssi}) - BELOW THRESHOLD", 'warning')
                 except ValueError:
@@ -862,6 +933,13 @@ class App(ttk.Frame):
 
         flash()
 
+    def _detected_reset_worker(self):
+        """Reset NODE-01 from DETECTED back to IDLE after the cooldown period."""
+        time.sleep(self.trigger_cooldown)
+        if node_states['NODE-01'] == 'DETECTED':
+            node_states['NODE-01'] = 'IDLE'
+            self.msg_q.put(("status", "DETECTED state cleared — NODE-01 reset to IDLE"))
+
     def _trigger_led_sequence(self, signal_type, confidence, rssi):
         """Execute the LED trigger sequence in a background thread"""
         if self.led_active:
@@ -873,12 +951,18 @@ class App(ttk.Frame):
                                   daemon=True)
         thread.start()
 
+    # Per-node ESP32 endpoints used for broadcast jam
+    NODE_ENDPOINTS = {
+        'NODE-01': 'http://192.168.1.200',
+        'NODE-02': 'http://192.168.1.201',
+        'NODE-03': 'http://192.168.1.202',
+    }
+
     def _led_sequence_worker(self, signal_type, confidence, rssi):
         """Worker thread for LED sequence"""
         try:
             self.led_active = True
             omnisig_api_endpoint = self.omnisig_api_var.get()
-            esp32_endpoint = self.esp32_endpoint_var.get()
 
             # Step 1: Stop OmniSIG inference
             self.msg_q.put(("status", "Stopping OmniSIG inference..."))
@@ -886,14 +970,38 @@ class App(ttk.Frame):
             response = api_client.stop_inference()
             self.msg_q.put(("status", f"OmniSIG stopped: {response}"))
 
-            # Step 2: Trigger JAM sequence on ESP32 (self-timed, 10 seconds)
-            node_states['NODE-01'] = 'JAMMING'
-            self.msg_q.put(("status", "Triggering JAM sequence on ESP32..."))
-            try:
-                resp = requests.get(f"{esp32_endpoint}/jam", timeout=3)
-                self.msg_q.put(("status", f"JAM triggered: {resp.status_code}"))
-            except Exception as e:
-                self.msg_q.put(("error", f"ESP32 JAM failed: {e}"))
+            # Step 2: Trigger JAM sequence on ESP32(s)
+            if self.broadcast_jam_var.get():
+                # Broadcast: jam all nodes in parallel
+                for node_id in node_states:
+                    node_states[node_id] = 'JAMMING'
+                self.msg_q.put(("status", "Broadcasting JAM to all nodes..."))
+
+                def _jam_node(node_id, endpoint):
+                    try:
+                        resp = requests.get(f"{endpoint}/jam", timeout=3)
+                        self.msg_q.put(("status", f"JAM {node_id}: {resp.status_code}"))
+                    except Exception as e:
+                        self.msg_q.put(("error", f"JAM {node_id} failed: {e}"))
+
+                jam_threads = [
+                    threading.Thread(target=_jam_node, args=(nid, ep), daemon=True)
+                    for nid, ep in self.NODE_ENDPOINTS.items()
+                ]
+                for jt in jam_threads:
+                    jt.start()
+                for jt in jam_threads:
+                    jt.join(timeout=5)
+            else:
+                # Single node: existing behavior
+                node_states['NODE-01'] = 'JAMMING'
+                esp32_endpoint = self.esp32_endpoint_var.get()
+                self.msg_q.put(("status", "Triggering JAM sequence on ESP32..."))
+                try:
+                    resp = requests.get(f"{esp32_endpoint}/jam", timeout=3)
+                    self.msg_q.put(("status", f"JAM triggered: {resp.status_code}"))
+                except Exception as e:
+                    self.msg_q.put(("error", f"ESP32 JAM failed: {e}"))
 
             # Trigger alert visuals/sound
             self._trigger_alert(signal_type, msg=None)
@@ -901,12 +1009,19 @@ class App(ttk.Frame):
             # Step 3: Wait for jam duration to complete
             time.sleep(10)
 
-            # Step 5: Restart OmniSIG inference
+            # Step 4: Restart OmniSIG inference
             self.msg_q.put(("status", "Restarting OmniSIG inference..."))
             response = api_client.start_inference()
             self.msg_q.put(("status", f"OmniSIG restarted: {response}"))
             api_client.close()
-            node_states['NODE-01'] = 'IDLE'
+
+            # Reset all jammed nodes back to IDLE
+            if self.broadcast_jam_var.get():
+                for node_id in node_states:
+                    if node_states[node_id] == 'JAMMING':
+                        node_states[node_id] = 'IDLE'
+            else:
+                node_states['NODE-01'] = 'IDLE'
 
             # Step 6: Set cooldown timer
             self.last_trigger_time = time.time()

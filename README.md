@@ -88,10 +88,13 @@ Each sensor node operates on a simple state machine reflected both physically (L
 
 ```
 🟢 IDLE      — Node online, heartbeating, monitoring
-🟡 JAMMING   — Target detected, RF suppression active (10s)
+🟡 DETECTED  — Target signal detected, operator awareness only (no jamming)
+🟠 JAMMING   — Target detected, RF suppression active (10s), AUTO JAM enabled
 🔴 KINETIC   — Tamper/motion detected, node compromised
 ⚫ OFFLINE   — Node dark (30s after kinetic, or connection lost)
 ```
+
+The DETECTED vs JAMMING distinction is controlled by the **AUTO JAM** toggle in Spectral Shroud. With AUTO JAM off, detections are logged and displayed but no physical effect is triggered — giving the operator situational awareness without committing to a response. With AUTO JAM on, the full jam sequence fires automatically.
 
 ---
 
@@ -101,11 +104,13 @@ Each sensor node operates on a simple state machine reflected both physically (L
 2. **Start Spectral Shroud** — connect to ZMQ, set watchlist to `DJI`
 3. **Open Cesium C2 Display** — nodes appear on Bakhmut, Ukraine satellite imagery, green heartbeat pulsing
 4. **DJI signal detected** — Shroud filters metadata, matches label
-5. **Jam sequence fires** — OmniSIG inference stops, HTTP command sent to ESP32, onboard LED lights yellow, NODE-01 flips yellow on Cesium map, alert banner fires
-6. **10 seconds elapse** — LED off, OmniSIG restarts, node returns to green
-7. **Rescan** — no signal (drone is down)
-8. **BOOT button pressed** — kinetic tamper trigger, node flips red on map
-9. **30 seconds elapse** — node goes dark (OFFLINE), LED off
+5. **AUTO JAM off:** NODE-01 flips yellow (DETECTED) on Cesium map, alert fires in Shroud — no physical effect triggered
+6. **AUTO JAM on:** OmniSIG inference stops, HTTP command sent to ESP32, onboard LED lights up, NODE-01 flips orange (JAMMING) on Cesium map
+7. **BROADCAST JAM on:** All nodes jam simultaneously in parallel
+8. **10 seconds elapse** — LED off, OmniSIG restarts, node(s) return to green
+9. **Rescan** — no signal (drone is down)
+10. **BOOT button pressed** — kinetic tamper trigger, node flips red on map
+11. **30 seconds elapse** — node goes dark (OFFLINE), LED off
 
 ---
 
@@ -216,11 +221,20 @@ spectral_shroud/
 
 ## Roadmap
 
-- [ ] Multi-node fan-out (broadcast commands to N nodes simultaneously)
+- [x] Multi-node fan-out (BROADCAST JAM — parallel commands to all nodes simultaneously)
+- [x] Config persistence (SAVE CONFIG button)
+- [x] Kinetic state machine (BOOT button tamper trigger, 30s auto-expire to OFFLINE)
+- [x] Cesium C2 geospatial display (Bakhmut, Ukraine satellite imagery)
+- [x] Flask /nodes API with real-time node state
+- [x] AUTO JAM toggle (detection-only vs automatic jamming mode)
+- [x] DETECTED state (yellow) separate from JAMMING state (orange)
+- [x] TEST ALERT button triggers full detection simulation including Cesium update
+- [x] Suppress Flask request log noise
 - [ ] Node identity + named coordinates (true geospatial DF approximation)
 - [ ] Real motion sensor (MPU-6050 accelerometer)
 - [ ] OmniSIG Engine end-to-end test with DJI IQ capture file
 - [ ] Colored LEDs (yellow/red/green physical state match)
+- [ ] Cesium jamming ring animation (pulsing visual effect on JAMMING nodes)
 - [ ] LoRa radio backup communications
 - [ ] Solar power budget analysis
 - [ ] Anti-tamper logic hardening
@@ -254,6 +268,8 @@ In the Shroud UI set:
 - **WATCH:** `DJI` (or whatever label your OmniSIG model outputs)
 - **ESP32 ENDPOINT:** `http://192.168.1.200` (your node's IP)
 - **Enable LED Trigger:** checked
+- **AUTO JAM:** checked to enable automatic jamming on detection, unchecked for detection-only mode
+- **BROADCAST JAM:** checked to jam all nodes simultaneously, unchecked for single-node only
 - Hit **[ CONNECT ]**
 
 Hit **[ SAVE CONFIG ]** so these settings persist on next launch.
@@ -278,10 +294,11 @@ for i in range(5):
 ```
 
 **Step 5 — Watch the kill chain fire**
-- Shroud detects the DJI label → stops OmniSIG inference
-- HTTP command sent to ESP32 → onboard LED lights up
-- NODE-01 flips yellow on the Cesium map → alert banner fires
-- After 10 seconds → LED off, OmniSIG restarts, node returns green
+- Shroud detects the DJI label → alert fires in Shroud
+- If AUTO JAM off: NODE-01 flips yellow (DETECTED) on Cesium map, no physical effect
+- If AUTO JAM on: OmniSIG inference stops → HTTP command sent to ESP32 → onboard LED lights up → NODE-01 flips orange (JAMMING) on Cesium map
+- If BROADCAST JAM on: all nodes flip orange and jam simultaneously
+- After 10 seconds → LED(s) off, OmniSIG restarts, node(s) return green
 
 **Step 6 — Trigger kinetic (tamper simulation)**
 Press the **BOOT button** on the ESP32. NODE-01 flips red on the map. After 30 seconds it goes dark (OFFLINE).

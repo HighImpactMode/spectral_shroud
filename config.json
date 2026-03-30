@@ -7,6 +7,7 @@
   "omnisig_api": "tcp://127.0.0.1:4003",
   "esp32_endpoint": "http://192.168.1.200",
   "enable_led_trigger": true,
+  "auto_jam": false,
   "case_sensitive": false,
   "beep": true
 }
