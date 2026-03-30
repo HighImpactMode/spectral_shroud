@@ -18,13 +18,14 @@ Modern battlefields are increasingly dominated by small, cheap, commercially ava
 The ideal system would have:
 
 1. **RF Sensing** — ML-driven signal classification and direction finding
-2. **Private Communications** — LoRa, private 5G, Starlink mesh
-3. **Jamming / Electronic Effects** — frequency-targeted RF suppression
-4. **Kinetic Self-Destruction** — anti-tamper denial capability
-5. **GPS Location Reporting** — real-time geospatial awareness
-6. **Sustainable Energy** — solar or energy harvesting
-7. **Mobility** — drone-like repositioning capability
-8. **Centralized C2** — managed but capable of autonomous operation
+2. **Direction Finding (DF)** — angle-of-arrival or TDOA-based emitter localization
+3. **Private Communications** — LoRa, private 5G, Starlink mesh
+4. **Jamming / Electronic Effects** — frequency-targeted RF suppression
+5. **Kinetic Self-Destruction** — anti-tamper denial capability
+6. **GPS Location Reporting** — real-time geospatial awareness
+7. **Sustainable Energy** — solar or energy harvesting
+8. **Mobility** — drone-like repositioning capability
+9. **Centralized C2** — managed but capable of autonomous operation
 
 Deployed as hundreds of low-cost nodes across a battlefield — emplaced manually or air-dropped — forming a resilient mesh where the loss of individual nodes does not collapse the system.
 
@@ -37,15 +38,15 @@ A proof of concept. One engineer, spare time, commercial hardware. The goal was 
 | Capability | Holy Grail | Spectral Shroud POC |
 |---|---|---|
 | RF Sensing (ML) | ✅ | ✅ via OmniSIG Engine |
-| Direction Finding | ✅ | ⚠️ Heatmap approximation (multi-node detection clustering) |
+| Direction Finding (DF) | ✅ | ⚠️ Mesh geometry approximation — detection clustering across nodes provides rough bearing |
 | Communications | ✅ | ✅ WiFi (802.11) |
-| Jamming | ✅ | 🟡 Represented by LED (yellow) |
-| Kinetic Effect | ✅ | 🟡 Represented by LED (red) + motion trigger |
+| Jamming | ✅ | 🟠 Represented by LED (orange) + ESP32 command |
+| Kinetic Effect | ✅ | 🔴 Represented by LED (red) + BOOT button tamper trigger |
 | GPS Reporting | ✅ | ✅ Hardcoded coordinates, Cesium geospatial display |
 | Sustainable Energy | ✅ | ❌ Battery only |
 | Mobility | ✅ | ❌ Static nodes |
-| C2 | ✅ | ✅ Laptop + Cesium globe |
-| Autonomous Operation | ✅ | ✅ State machine, no human in loop after trigger |
+| C2 | ✅ | ✅ Laptop + Cesium globe on Bakhmut satellite imagery |
+| Autonomous Operation | ✅ | ✅ State machine, AUTO JAM mode, no human in loop after trigger |
 
 ---
 
