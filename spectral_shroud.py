@@ -64,7 +64,7 @@ def get_motion_reset():
 def start_flask():
     import logging
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
-    flask_app.run(host='0.0.0.0', port=5000, use_reloader=False)
+    flask_app.run(host='0.0.0.0', port=5001, use_reloader=False)
 
 
 CONFIG_FILE = "config.json"
